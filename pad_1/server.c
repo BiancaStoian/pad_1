@@ -84,6 +84,7 @@ int login(client_t *client, char *username, char *password){
 	for(i=0;i<no_users; i++){
 		if(!strcmp(username, users[i].name) && !strcmp(password, users[i].password)){
 			client->user = users[i];
+			strcpy(client->user.name, users[i].name);
 			add_client(client);
 			return 1;
 		}
@@ -104,19 +105,27 @@ int is_online(client_t *client){
 }
 
 int send_message(int fd, char *message){
-	printf("...%s...\n", message);
 	return write(fd, message, strlen(message));
 }
 
-void send_message_to_all(char *message){
+void send_message_to_all(char *message, client_t *current_client, int needs_name){
 	int i;	
 	for(i=0; i<MAX_CLIENTS; i++){
 		client_t *client = client_list[i];
-		if(client){
-			send_message(client->client_fd, message);
+		if(client && (client->client_fd != current_client->client_fd)){
+			if (needs_name == 1){
+				char *new_message;
+				int len = strlen(message) + 2 + strlen(current_client->user.name) + 2;
+				new_message = (char *) malloc(len * sizeof(char));
+				snprintf(new_message, len, "*%s: %s", current_client->user.name, message);
+				send_message(client->client_fd, new_message);
+			} else {
+				send_message(client->client_fd, message);
+			}
 		}
 	}
 }
+
 
 void strip_newline(char *s){
 	while(*s != '\0'){
@@ -144,7 +153,6 @@ void *handle_client(void *arg){
 				len = recv(client->client_fd, buff_in, BUFFER_SIZE, 0);
 				strip_newline(buff_in);
 				strcpy(username, buff_in);
-				printf("****%s***\n", username);
 				send_message(client->client_fd, "password = ");
 				len = recv(client->client_fd, buff_in, BUFFER_SIZE, 0);
 				strip_newline(buff_in);
@@ -153,16 +161,17 @@ void *handle_client(void *arg){
 				if(!is_online(client)){
 					if(login(client, username, password)){
 						state = 2;
-						int len = 29 + strlen(client->user.name);
+						int len = 31 + strlen(client->user.name);
 						char *s  = (char *) malloc (len * sizeof(char)) ;
-						snprintf(s, len, "User %s has joined the chat", client->user.name);		
-						send_message_to_all(s);
+						snprintf(s, len, "**User %s has joined the chat", client->user.name);					
+						send_message_to_all(s, client, 0);
+						send_message(client->client_fd, "**You are now connected to the chat");
 						break;
 					} else{
-						send_message(client->client_fd, "Login failed. Please retry");
+						send_message(client->client_fd, "**Login failed. Please retry");
 					}
 				} else{
-					send_message(client->client_fd, "The user is already logged in..");
+					send_message(client->client_fd, "**The user is already logged in...\n");
 				}
 				state = 0;
 				
@@ -189,8 +198,6 @@ void *handle_client(void *arg){
 		if(state == 2){
 			len = recv(client->client_fd, buff_in, BUFFER_SIZE, 0);
 			strip_newline(buff_in);
-			send_message_to_all(buff_in);
-			
 		}
 		if(!strcmp(buff_in, LOGOUT)){
 			break;
@@ -203,12 +210,14 @@ void *handle_client(void *arg){
 		} else if(!strcmp(buff_in, OPTIONS)){
 			state = 0;
 		} 
-		
+		send_message_to_all(buff_in, client, 1);
 	}
-	len = 27 + strlen(client->user.name);
+	len = 29 + strlen(client->user.name);
 	char *s = (char *) malloc (len * sizeof(char));
-	snprintf(s, len, "\nUser %s has left the chat", client->user.name);
-	send_message_to_all(s);
+	snprintf(s, len, "\n**User %s has left the chat\n", client->user.name);
+	send_message_to_all(s, client, 0);
+
+	send_message(client->client_fd, "You left the chat\n");
 	close(client->client_fd);
 	remove_client(client);
 	return NULL;
